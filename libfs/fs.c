@@ -13,11 +13,11 @@
 
 struct __attribute__((packed)) superblock {
     char signature[8];             // 0x00
-    uint16_t total_blk_count;         // 0x08
-    uint16_t rdir_blk;           // 0x0A
-    uint16_t data_blk;           // 0x0C
+    uint16_t total_blk_count;      // 0x08
+    uint16_t rdir_blk;             // 0x0A
+    uint16_t data_blk;             // 0x0C
     uint16_t data_count;           // 0x0E
-    uint8_t fat_blk_count;            // 0x10
+    uint8_t fat_blk_count;         // 0x10
     uint8_t unused[BLOCK_SIZE - 16]; // 0x11
 };
 
@@ -123,16 +123,90 @@ int fs_info(void)
 int fs_create(const char *filename)
 {
 	/* TODO: Phase 2 */
+
+    //error check
+    if (!fs_mounted || filename == NULL || strlen(filename) == 0 || strlen(filename) >= FS_FILENAME_LEN ) {
+        return -1;
+    }
+
+    //check for already existing file
+    for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+        if(strncmp(root_dir[i].filename, filename, FS_FILENAME_LEN) == 0)
+        return -1;
+    }
+
+    //finds empty entry in root directory and fills it out
+    for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+        if (root_dir[i].filename[0] == "\0") {
+            strncpy(root_dir[i].filename, filename, FS_FILENAME_LEN);
+            root_dir[i].filename[FS_FILENAME_LEN - 1] = '\0'; 
+            root_dir[i].size = 0;
+            root_dir[i].first_data_index = FAT_EOC;
+
+            if (block_write(sb.rdir_blk, root_dir < 0)){
+                return -1;
+            }
+
+            return 0;
+        }
+    }
+
+    return -1;
 }
 
 int fs_delete(const char *filename)
 {
 	/* TODO: Phase 2 */
+    if (!fs_mounted || filename == NULL || strlen(filename) == 0 || strlen(filename) >= FS_FILENAME_LEN) {
+        return -1;
+    }
+
+    for (int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+        if (strncmp(root_dir[i].filename, filename, FS_FILENAME_LEN) == 0) {
+            uint16_t curr = root_dir[i].first_data_index;
+
+            //frees the FAT chain
+            while (curr != FAT_EOC) {
+                uint16_t next = fat[curr];
+                fat[curr] = 0;
+                curr = next; 
+            }
+
+            //Clears the root entry
+            memset(&root_dir[i], 0, sizeof(struct root_entry));
+
+            for(int j = 0; j < sb.fat_blk_count; j++) {
+                if (block_write(1 + j, (uint8_t*)fat + j * BLOCK_SIZE) < 0){
+                    return -1;
+                }                
+            }
+            if (block_write(sb.rdir_blk, root_dir) < 0) {
+                return -1;
+            }
+
+            return 0;
+        }
+    }
 }
 
 int fs_ls(void)
 {
 	/* TODO: Phase 2 */
+
+    if (!fs_mounted){
+        return -1;
+    }
+
+    for (int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+        if(root_dir[i].filename[0] != '\0') {
+            printf("file: %s, size: %u, data_blk: %u\n", //check reference program for formatting
+                   root_dir[i].filename,
+                   root_dir[i].size,
+                   root_dir[i].first_data_index);
+        }
+    }
+
+    return 0;
 }
 
 int fs_open(const char *filename)
