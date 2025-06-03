@@ -137,13 +137,13 @@ int fs_create(const char *filename)
 
     //finds empty entry in root directory and fills it out
     for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
-        if (root_dir[i].filename[0] == "\0") {
+        if (root_dir[i].filename[0] == '\0') {
             strncpy(root_dir[i].filename, filename, FS_FILENAME_LEN);
             root_dir[i].filename[FS_FILENAME_LEN - 1] = '\0'; 
             root_dir[i].size = 0;
             root_dir[i].first_data_index = FAT_EOC;
 
-            if (block_write(sb.rdir_blk, root_dir < 0)){
+            if (block_write(sb.rdir_blk, root_dir) < 0){
                 return -1;
             }
 
@@ -187,6 +187,8 @@ int fs_delete(const char *filename)
             return 0;
         }
     }
+
+    return -1;
 }
 
 int fs_ls(void)
