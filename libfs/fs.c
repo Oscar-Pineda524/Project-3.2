@@ -10,6 +10,16 @@
 #define FS_SIG "ECS150FS"
 #define FS_SIG_LEN 8
 #define FAT_EOC 0xFFFF
+#define FD_MAX_COUNT 32
+
+struct file_descriptor {
+    int used;                     // is this entry used?
+    struct root_entry *file;     // pointer to the root directory entry
+    size_t offset;               // current file offset
+};
+
+static struct file_descriptor fd_table[FD_MAX_COUNT];
+
 
 struct __attribute__((packed)) superblock {
     char signature[8];             // 0x00
@@ -214,21 +224,65 @@ int fs_ls(void)
 int fs_open(const char *filename)
 {
 	/* TODO: Phase 3 */
+	if (!fs_mounted || filename == NULL)
+        return -1;
+
+    //finds the file in the root directory
+    struct root_entry *entry = NULL;
+    for (int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+        if (strncmp(root_dir[i].filename, filename, FS_FILENAME_LEN) == 0) {
+            entry = &root_dir[i];
+            break;
+        }
+    }
+
+    if (!entry) return -1; //file not found
+
+    //finding unused slot in fd_table
+    for (int fd = 0; fd < FD_MAX_COUNT; fd++) {
+        if (!fd_table[fd].used) {
+            fd_table[fd].used = 1;
+            fd_table[fd].file = entry;
+            fd_table[fd].offset = 0;
+            return fd;
+        }
+    }
+
+    return -1; //no free fd's
 }
 
 int fs_close(int fd)
 {
 	/* TODO: Phase 3 */
+	if (!fs_mounted || fd < 0 || fd >= FD_MAX_COUNT || !fd_table[fd].used)
+        return -1;
+
+    fd_table[fd].used = 0;
+    fd_table[fd].file = NULL;
+    fd_table[fd].offset = 0;
+    return 0;
 }
 
 int fs_stat(int fd)
 {
 	/* TODO: Phase 3 */
+	if (!fs_mounted || fd < 0 || fd >= FD_MAX_COUNT || !fd_table[fd].used)
+        return -1;
+
+    return fd_table[fd].file->size;
 }
 
 int fs_lseek(int fd, size_t offset)
 {
 	/* TODO: Phase 3 */
+	if (!fs_mounted || fd < 0 || fd >= FD_MAX_COUNT || !fd_table[fd].used)
+        return -1;
+
+    if (offset > fd_table[fd].file->size)
+        return -1;
+
+    fd_table[fd].offset = offset;
+    return 0;
 }
 
 int fs_write(int fd, void *buf, size_t count)
