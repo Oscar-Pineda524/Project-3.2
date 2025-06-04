@@ -209,6 +209,8 @@ int fs_ls(void)
         return -1;
     }
 
+    printf("FS Ls:\n");
+
     for (int i = 0; i < FS_FILE_MAX_COUNT; i++) {
         if(root_dir[i].filename[0] != '\0') {
             printf("file: %s, size: %u, data_blk: %u\n", //check reference program for formatting
