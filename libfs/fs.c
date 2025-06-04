@@ -285,12 +285,160 @@ int fs_lseek(int fd, size_t offset)
     return 0;
 }
 
+static int allocate_free_block()
+{
+    for (int i = 0; i < sb.data_count; i++) {
+        if (fat[i] == 0) {
+            fat[i] = FAT_EOC;  // Mark as allocated
+            return i;
+        }
+    }
+    return -1;  // No free block found
+}
+
+static int get_block_index_or_allocate(struct root_entry *file, size_t offset)
+{
+    uint16_t block_index = file->first_data_index;
+
+    // If the file is empty, allocate the first block
+    if (block_index == FAT_EOC) {
+        int new_block = allocate_free_block();
+        if (new_block < 0) {
+            return -1;
+        }
+        file->first_data_index = new_block;
+        return new_block;
+    }
+
+    // Traverse the FAT chain
+    size_t block_pos = offset / BLOCK_SIZE;
+    for (size_t i = 0; i < block_pos; i++) {
+        if (fat[block_index] == FAT_EOC) {
+            // Allocate a new block and link it
+            int new_block = allocate_free_block();
+            if (new_block < 0) {
+                return -1;
+            }
+            fat[block_index] = new_block;
+            fat[new_block] = FAT_EOC;
+        }
+        block_index = fat[block_index];
+    }
+
+    return block_index;
+}
+
 int fs_write(int fd, void *buf, size_t count)
 {
 	/* TODO: Phase 4 */
+
+    if (!fs_mounted || fd < 0 || fd >= FD_MAX_COUNT || !fd_table[fd].used){
+        return -1;
+    }
+
+    struct file_descriptor *fd_entry = &fd_table[fd];
+    struct root_entry *file = fd_entry->file;
+
+    size_t offset = fd_entry->offset;
+    size_t bytes_written = 0;
+    uint8_t bounce_buffer[BLOCK_SIZE];
+
+    while (bytes_written < count){
+        int block_index = get_block_index_or_allocate(file, offset);
+        if (block_index < 0) {
+            return -1;
+        }
+
+        if (block_read(sb.data_blk + block_index, bounce_buffer) < 0) {
+            return -1;
+        }
+
+        size_t offset_in_block = offset % BLOCK_SIZE;
+        size_t space_in_block = BLOCK_SIZE - offset_in_block;
+        size_t copy_bytes = (count - bytes_written < space_in_block) ? (count - bytes_written) : space_in_block;
+        
+        memcpy(bounce_buffer + offset_in_block, (uint8_t*)buf + bytes_written, copy_bytes);
+
+        // Write the modified block back to disk
+        if (block_write(sb.data_blk + block_index, bounce_buffer) < 0) {
+            return -1;
+        }
+
+        offset += copy_bytes;
+        bytes_written += copy_bytes;
+    }
+
+    fd_entry->offset = offset;
+    if (offset > file->size) {
+        file->size = offset;
+    }
+
+    // Write back FAT to disk
+    for (int i = 0; i < sb.fat_blk_count; i++) {
+        if (block_write(1 + i, (uint8_t*)fat + i * BLOCK_SIZE) < 0) {
+            return -1;
+        }
+    }
+
+    // Write back root directory to disk
+    if (block_write(sb.rdir_blk, root_dir) < 0) {
+        return -1;
+    }
+
+    return bytes_written;
+
 }
 
 int fs_read(int fd, void *buf, size_t count)
 {
 	/* TODO: Phase 4 */
+    if (!fs_mounted || fd < 0 || fd >= FD_MAX_COUNT || !fd_table[fd].used)
+        return -1;
+    
+    struct file_descriptor *fd_entry = &fd_table[fd];
+    struct root_entry *file = fd_entry->file;
+
+    size_t offset = fd_entry->offset;
+    size_t file_size = file->size;
+
+    if (offset >= file_size) {
+        return 0;
+    }
+
+    size_t bytes_to_read = count;
+    if (offset + bytes_to_read > file_size) {
+        bytes_to_read = file_size - offset; 
+    }
+
+    size_t bytes_read = 0;
+    uint8_t bounce_buffer[BLOCK_SIZE];
+
+    uint16_t block_index = file->first_data_index;
+    size_t block_offset = offset;
+    while (block_offset >= BLOCK_SIZE && block_index != FAT_EOC){
+        block_index = fat[block_index];
+        block_offset -= BLOCK_SIZE; 
+    }
+
+    while (bytes_read < bytes_to_read && block_index != FAT_EOC) {
+        if(block_read(sb.data_blk + block_index, bounce_buffer) < 0){
+            return -1;
+        }
+
+        size_t offset_in_block = block_offset % BLOCK_SIZE;
+        size_t space_in_block = BLOCK_SIZE - offset_in_block;
+        size_t copy_bytes = (bytes_to_read - bytes_read < space_in_block) ? (bytes_to_read - bytes_read) : space_in_block;
+
+        memcpy((uint8_t*)buf + bytes_read, bounce_buffer + offset_in_block, copy_bytes);
+
+        bytes_read += copy_bytes;
+        block_offset = 0;
+
+        block_index = fat[block_index];
+    }
+
+    fd_entry->offset += bytes_read;
+
+    return bytes_read;
+
 }
