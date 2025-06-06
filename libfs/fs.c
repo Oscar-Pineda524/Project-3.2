@@ -287,7 +287,7 @@ int fs_lseek(int fd, size_t offset)
     return 0;
 }
 
-static int allocate_free_block()
+static int freeblock_allocation()
 {
     for (int i = 0; i < sb.data_count; i++) {
         if (fat[i] == 0) {
@@ -298,13 +298,13 @@ static int allocate_free_block()
     return -1;  // No free block found
 }
 
-static int get_block_index_or_allocate(struct root_entry *file, size_t offset)
+static int fetch_indez_or_allocate(struct root_entry *file, size_t offset)
 {
     uint16_t block_index = file->first_data_index;
 
     // If the file is empty, allocate the first block
     if (block_index == FAT_EOC) {
-        int new_block = allocate_free_block();
+        int new_block = freeblock_allocation();
         if (new_block < 0) {
             return -1;
         }
@@ -317,7 +317,7 @@ static int get_block_index_or_allocate(struct root_entry *file, size_t offset)
     for (size_t i = 0; i < block_pos; i++) {
         if (fat[block_index] == FAT_EOC) {
             // Allocate a new block and link it
-            int new_block = allocate_free_block();
+            int new_block = freeblock_allocation();
             if (new_block < 0) {
                 return -1;
             }
@@ -346,7 +346,7 @@ int fs_write(int fd, void *buf, size_t count)
     uint8_t bounce_buffer[BLOCK_SIZE];
 
     while (bytes_written < count){
-        int block_index = get_block_index_or_allocate(file, offset);
+        int block_index = fetch_indez_or_allocate(file, offset);
         if (block_index < 0) {
             return -1;
         }
